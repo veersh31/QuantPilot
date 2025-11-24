@@ -82,16 +82,19 @@ export function useChatWithAI() {
         let mlPredictions = null
         if (targetStock) {
           try {
-            const mlResponse = await fetch('http://localhost:8000/predict', {
+            // Call the Next.js ML API route which forwards to Python service
+            // This works both locally and on Vercel (if ML service is deployed)
+            const mlResponse = await fetch('/api/ml/predict', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ symbol: targetStock }),
             })
             if (mlResponse.ok) {
-              mlPredictions = await mlResponse.json()
+              const data = await mlResponse.json()
+              mlPredictions = data.predictions
             }
           } catch (err) {
-            console.log('ML predictions not available')
+            console.log('ML predictions not available - ML service may not be running')
           }
         }
 

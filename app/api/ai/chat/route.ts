@@ -170,12 +170,15 @@ export async function POST(request: Request) {
     let newsData: any[] = []
     if (targetStock) {
       try {
-        const newsResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/stocks/news`, {
+        // Use dynamic import to call the news API directly (server-side)
+        const { POST: getNews } = await import('@/app/api/stocks/news/route')
+        const newsRequest = new Request('http://localhost:3000/api/stocks/news', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ symbol: targetStock }),
         })
 
+        const newsResponse = await getNews(newsRequest)
         if (newsResponse.ok) {
           const newsJson = await newsResponse.json()
           newsData = newsJson.news || []
