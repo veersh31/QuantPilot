@@ -14,7 +14,34 @@ export interface HistoricalData {
   data: HistoricalDataPoint[]
 }
 
-export function useHistoricalData(symbol: string | null, days: number = 60) {
+export type TimeframeOption = '1D' | '5D' | '1M' | '3M' | '6M' | '1Y' | '5Y' | 'MAX'
+
+/**
+ * Convert timeframe string to number of days
+ */
+export function timeframeToDays(timeframe: TimeframeOption): number {
+  const mapping: Record<TimeframeOption, number> = {
+    '1D': 1,
+    '5D': 5,
+    '1M': 30,
+    '3M': 90,
+    '6M': 180,
+    '1Y': 365,
+    '5Y': 1825,
+    'MAX': 3650 // 10 years
+  }
+  return mapping[timeframe]
+}
+
+/**
+ * Hook to fetch historical stock data with flexible timeframe support
+ * @param symbol Stock symbol (e.g., 'AAPL')
+ * @param timeframe Timeframe option ('1D', '5D', '1M', '3M', '6M', '1Y', '5Y', 'MAX') or custom days
+ */
+export function useHistoricalData(
+  symbol: string | null,
+  timeframe: TimeframeOption | number = '1M'
+) {
   const [data, setData] = useState<HistoricalData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -27,6 +54,11 @@ export function useHistoricalData(symbol: string | null, days: number = 60) {
       setError(null)
 
       try {
+        // Convert timeframe to days if it's a string
+        const days = typeof timeframe === 'string'
+          ? timeframeToDays(timeframe)
+          : timeframe
+
         const response = await fetch('/api/stocks/historical', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -48,7 +80,7 @@ export function useHistoricalData(symbol: string | null, days: number = 60) {
     }
 
     fetchHistoricalData()
-  }, [symbol, days])
+  }, [symbol, timeframe])
 
   return { data, loading, error }
 }

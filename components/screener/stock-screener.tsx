@@ -5,9 +5,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Slider } from '@/components/ui/slider'
-import { Search, Filter, TrendingUp, TrendingDown, Plus, X } from 'lucide-react'
+import { Textarea } from '@/components/ui/textarea'
+import { Badge } from '@/components/ui/badge'
+import { Search, Filter, TrendingUp, TrendingDown, Plus, X, Upload, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface ScreenerFilters {
@@ -19,7 +19,6 @@ interface ScreenerFilters {
   maxDividendYield: number
   minPrice: number
   maxPrice: number
-  sector: string
 }
 
 interface ScreenedStock {
@@ -34,27 +33,12 @@ interface ScreenedStock {
   volume: number
 }
 
-const POPULAR_STOCKS = [
-  'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'TSLA', 'NVDA', 'AMD',
-  'NFLX', 'DIS', 'PYPL', 'INTC', 'CSCO', 'ADBE', 'CRM', 'ORCL',
-  'IBM', 'QCOM', 'TXN', 'AVGO', 'COST', 'PEP', 'KO', 'WMT',
-  'JPM', 'BAC', 'WFC', 'GS', 'MS', 'C', 'V', 'MA',
-  'JNJ', 'UNH', 'PFE', 'ABBV', 'TMO', 'DHR', 'MDT', 'BMY',
-  'XOM', 'CVX', 'COP', 'SLB', 'OXY', 'PSX', 'VLO', 'MPC'
-]
-
-const SECTORS = [
-  'All Sectors',
-  'Technology',
-  'Healthcare',
-  'Financial',
-  'Consumer',
-  'Energy',
-  'Industrial',
-  'Materials',
-  'Utilities',
-  'Real Estate'
-]
+interface SearchResult {
+  symbol: string
+  name: string
+  type: string
+  exchange: string
+}
 
 export function StockScreener() {
   const [filters, setFilters] = useState<ScreenerFilters>({
@@ -65,13 +49,19 @@ export function StockScreener() {
     minDividendYield: 0,
     maxDividendYield: 10,
     minPrice: 0,
-    maxPrice: 1000,
-    sector: 'All Sectors'
+    maxPrice: 1000
   })
 
   const [results, setResults] = useState<ScreenedStock[]>([])
   const [loading, setLoading] = useState(false)
   const [searchPerformed, setSearchPerformed] = useState(false)
+
+  // Ticker input and search
+  const [tickerInput, setTickerInput] = useState('')
+  const [tickersToScreen, setTickersToScreen] = useState<string[]>([])
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([])
+  const [searching, setSearching] = useState(false)
 
   const parseMarketCap = (marketCapStr: string): number => {
     if (!marketCapStr) return 0
@@ -85,14 +75,81 @@ export function StockScreener() {
     return value / 1000000000 // Convert raw number to billions
   }
 
+  // Search for stocks by name or symbol
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) return
+
+    setSearching(true)
+    try {
+      const response = await fetch('/api/stocks/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: searchQuery }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setSearchResults(data.results)
+      } else {
+        toast.error('Search failed')
+      }
+    } catch (error) {
+      console.error('Search error:', error)
+      toast.error('Failed to search stocks')
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  // Add ticker to screening list
+  const addTicker = (symbol: string) => {
+    const upperSymbol = symbol.toUpperCase().trim()
+    if (!upperSymbol) return
+
+    if (tickersToScreen.includes(upperSymbol)) {
+      toast.error(`${upperSymbol} already added`)
+      return
+    }
+
+    setTickersToScreen([...tickersToScreen, upperSymbol])
+    setSearchQuery('')
+    setSearchResults([])
+    toast.success(`Added ${upperSymbol} to screening list`)
+  }
+
+  // Remove ticker from screening list
+  const removeTicker = (symbol: string) => {
+    setTickersToScreen(tickersToScreen.filter(t => t !== symbol))
+  }
+
+  // Parse comma-separated or newline-separated tickers
+  const handleBulkAdd = () => {
+    const tickers = tickerInput
+      .split(/[\s,\n]+/)
+      .map(t => t.toUpperCase().trim())
+      .filter(t => t.length > 0)
+
+    const newTickers = [...new Set([...tickersToScreen, ...tickers])]
+    setTickersToScreen(newTickers)
+    setTickerInput('')
+    toast.success(`Added ${newTickers.length - tickersToScreen.length} new tickers`)
+  }
+
   const runScreener = async () => {
+    if (tickersToScreen.length === 0) {
+      toast.error('Please add tickers to screen')
+      return
+    }
+
     setLoading(true)
     setSearchPerformed(true)
     const screenedStocks: ScreenedStock[] = []
 
     try {
-      // Fetch data for popular stocks and filter based on criteria
-      for (const symbol of POPULAR_STOCKS) {
+      toast.info(`Screening ${tickersToScreen.length} tickers...`)
+
+      // Fetch data for all tickers and filter based on criteria
+      for (const symbol of tickersToScreen) {
         try {
           const response = await fetch('/api/stocks/quote', {
             method: 'POST',
@@ -135,7 +192,7 @@ export function StockScreener() {
       }
 
       setResults(screenedStocks)
-      toast.success(`Found ${screenedStocks.length} stocks matching criteria`)
+      toast.success(`Found ${screenedStocks.length} of ${tickersToScreen.length} stocks matching criteria`)
     } catch (error) {
       console.error('Error running screener:', error)
       toast.error('Failed to run screener')
@@ -153,8 +210,7 @@ export function StockScreener() {
       minDividendYield: 0,
       maxDividendYield: 10,
       minPrice: 0,
-      maxPrice: 1000,
-      sector: 'All Sectors'
+      maxPrice: 1000
     })
     setResults([])
     setSearchPerformed(false)
@@ -162,14 +218,113 @@ export function StockScreener() {
 
   return (
     <div className="space-y-6">
+      {/* Ticker Selection */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Search size={20} />
+            Select Stocks to Screen
+          </CardTitle>
+          <CardDescription>
+            Search for stocks or add tickers manually. Currently screening {tickersToScreen.length} tickers.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Search by name/symbol */}
+          <div>
+            <Label className="text-sm font-medium mb-2 block">Search by Company Name or Symbol</Label>
+            <div className="flex gap-2">
+              <Input
+                placeholder="e.g., Apple, AAPL, Microsoft..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+              />
+              <Button onClick={handleSearch} disabled={searching || !searchQuery.trim()}>
+                {searching ? <Loader2 size={18} className="animate-spin" /> : <Search size={18} />}
+              </Button>
+            </div>
+
+            {/* Search Results */}
+            {searchResults.length > 0 && (
+              <div className="mt-3 space-y-2 max-h-64 overflow-y-auto">
+                {searchResults.map((result) => (
+                  <div
+                    key={result.symbol}
+                    className="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-muted/50"
+                  >
+                    <div>
+                      <div className="font-bold">{result.symbol}</div>
+                      <div className="text-sm text-muted-foreground">{result.name}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {result.type} • {result.exchange}
+                      </div>
+                    </div>
+                    <Button size="sm" onClick={() => addTicker(result.symbol)}>
+                      <Plus size={16} className="mr-1" />
+                      Add
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Bulk add tickers */}
+          <div>
+            <Label className="text-sm font-medium mb-2 block">Or Add Multiple Tickers</Label>
+            <Textarea
+              placeholder="Enter tickers separated by commas or new lines&#10;e.g., AAPL, MSFT, GOOGL&#10;or&#10;AAPL&#10;MSFT&#10;GOOGL"
+              value={tickerInput}
+              onChange={(e) => setTickerInput(e.target.value)}
+              rows={4}
+            />
+            <Button onClick={handleBulkAdd} className="mt-2" variant="outline" disabled={!tickerInput.trim()}>
+              <Upload size={18} className="mr-2" />
+              Add Tickers
+            </Button>
+          </div>
+
+          {/* Selected tickers */}
+          {tickersToScreen.length > 0 && (
+            <div>
+              <Label className="text-sm font-medium mb-2 block">
+                Tickers to Screen ({tickersToScreen.length})
+              </Label>
+              <div className="flex flex-wrap gap-2 p-3 rounded-lg border border-border bg-muted/20 max-h-48 overflow-y-auto">
+                {tickersToScreen.map((ticker) => (
+                  <Badge key={ticker} variant="secondary" className="text-sm py-1 px-3">
+                    {ticker}
+                    <button
+                      onClick={() => removeTicker(ticker)}
+                      className="ml-2 hover:text-destructive"
+                    >
+                      <X size={14} />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+              <Button
+                onClick={() => setTickersToScreen([])}
+                variant="ghost"
+                size="sm"
+                className="mt-2"
+              >
+                Clear All
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Filters */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Filter size={20} />
-            Stock Screener
+            Screening Filters
           </CardTitle>
-          <CardDescription>Find stocks that match your investment criteria</CardDescription>
+          <CardDescription>Set criteria to filter the selected stocks</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           {/* Market Cap Filter */}
@@ -315,7 +470,7 @@ export function StockScreener() {
                 <Search size={48} className="mx-auto opacity-30" />
               </div>
               <p>Screening stocks...</p>
-              <p className="text-sm mt-2">Analyzing {POPULAR_STOCKS.length} stocks</p>
+              <p className="text-sm mt-2">Analyzing {tickersToScreen.length} tickers</p>
             </div>
           </CardContent>
         </Card>

@@ -1,9 +1,11 @@
 'use client'
 
+import { useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart } from 'recharts'
-import { useHistoricalData } from '@/hooks/use-historical-data'
+import { useHistoricalData, TimeframeOption } from '@/hooks/use-historical-data'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Button } from '@/components/ui/button'
 
 // Advanced indicator calculations
 function calculateIndicators(historicalData: Array<{ date: string; close: number; volume: number; high: number; low: number }>) {
@@ -105,7 +107,10 @@ function calculateEMA(prices: number[], period: number): number {
 }
 
 export function AnalyticsCharts({ symbol }: { symbol: string }) {
-  const { data: historicalData, loading, error } = useHistoricalData(symbol, 60)
+  const [timeframe, setTimeframe] = useState<TimeframeOption>('1M')
+  const { data: historicalData, loading, error } = useHistoricalData(symbol, timeframe)
+
+  const timeframeOptions: TimeframeOption[] = ['1D', '5D', '1M', '3M', '6M', '1Y', '5Y']
 
   if (loading) {
     return (
@@ -139,12 +144,63 @@ export function AnalyticsCharts({ symbol }: { symbol: string }) {
 
   const data = calculateIndicators(historicalData.data)
 
+  // Filter data for indicators that require more data points
+  const macdData = data.filter(d => d.macd !== null)
+  const rsiData = data.filter(d => d.rsi !== null)
+  const stochasticData = data.filter(d => d.stochastic !== null)
+  const bollingerData = data.filter(d => d.bollinger_middle !== null)
+
+  // Check if we have enough data for each indicator
+  const hasEnoughDataForMACD = macdData.length >= 10
+  const hasEnoughDataForRSI = rsiData.length >= 10
+  const hasEnoughDataForStochastic = stochasticData.length >= 10
+  const hasEnoughDataForBollinger = bollingerData.length >= 10
+
   return (
     <div className="space-y-6">
+      {/* Timeframe Selector */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Chart Timeframe</CardTitle>
+              <CardDescription>Select data range for all charts below</CardDescription>
+            </div>
+            <div className="flex gap-1">
+              {timeframeOptions.map((tf) => (
+                <Button
+                  key={tf}
+                  variant={timeframe === tf ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setTimeframe(tf)}
+                  className="min-w-[50px]"
+                >
+                  {tf}
+                </Button>
+              ))}
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
+
+      {/* Data Warning */}
+      {(!hasEnoughDataForMACD || !hasEnoughDataForRSI || !hasEnoughDataForBollinger) && (
+        <Card className="bg-amber-500/10 border-amber-500/20">
+          <CardContent className="pt-4">
+            <p className="text-sm text-amber-600 dark:text-amber-400">
+              <strong>Note:</strong> Some technical indicators require more data points. For best results, select 1M or longer timeframes.
+              {!hasEnoughDataForMACD && ' MACD requires 26+ days.'}
+              {!hasEnoughDataForRSI && ' RSI requires 14+ days.'}
+              {!hasEnoughDataForBollinger && ' Bollinger Bands require 20+ days.'}
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Price Chart with Bollinger Bands */}
       <Card>
         <CardHeader>
-          <CardTitle>{symbol} - Price with Bollinger Bands</CardTitle>
+          <CardTitle>{symbol} - Price with Bollinger Bands ({timeframe})</CardTitle>
           <CardDescription>Price trend and volatility bands</CardDescription>
         </CardHeader>
         <CardContent>
@@ -177,24 +233,34 @@ export function AnalyticsCharts({ symbol }: { symbol: string }) {
       <Card>
         <CardHeader>
           <CardTitle>MACD - Moving Average Convergence Divergence</CardTitle>
-          <CardDescription>Trend-following momentum indicator</CardDescription>
+          <CardDescription>Trend-following momentum indicator (requires 26+ data points)</CardDescription>
         </CardHeader>
         <CardContent>
-          <ResponsiveContainer width="100%" height={250}>
-            <ComposedChart data={data} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-              <XAxis dataKey="date" stroke="var(--color-muted-foreground)" tick={{ fontSize: 12 }} />
-              <YAxis stroke="var(--color-muted-foreground)" tick={{ fontSize: 12 }} />
-              <Tooltip 
-                contentStyle={{ background: 'var(--color-card)', border: '1px solid var(--color-border)', borderRadius: '6px' }}
-                labelStyle={{ color: 'var(--color-foreground)' }}
-                formatter={(value: any) => value?.toFixed(4)}
-              />
-              <Bar dataKey="histogram" fill="var(--color-chart-3)" opacity={0.3} />
-              <Line type="monotone" dataKey="macd" stroke="var(--color-primary)" dot={false} strokeWidth={2} />
-              <Line type="monotone" dataKey="signal" stroke="var(--color-accent)" dot={false} strokeWidth={2} />
-            </ComposedChart>
-          </ResponsiveContainer>
+          {hasEnoughDataForMACD ? (
+            <ResponsiveContainer width="100%" height={250}>
+              <ComposedChart data={macdData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                <XAxis dataKey="date" stroke="var(--color-muted-foreground)" tick={{ fontSize: 12 }} />
+                <YAxis stroke="var(--color-muted-foreground)" tick={{ fontSize: 12 }} />
+                <Tooltip
+                  contentStyle={{ background: 'var(--color-card)', border: '1px solid var(--color-border)', borderRadius: '6px' }}
+                  labelStyle={{ color: 'var(--color-foreground)' }}
+                  formatter={(value: any) => value?.toFixed(4)}
+                />
+                <Legend />
+                <Bar dataKey="histogram" fill="var(--color-chart-3)" opacity={0.3} name="Histogram" />
+                <Line type="monotone" dataKey="macd" stroke="var(--color-primary)" dot={false} strokeWidth={2} name="MACD" />
+                <Line type="monotone" dataKey="signal" stroke="var(--color-accent)" dot={false} strokeWidth={2} name="Signal" />
+              </ComposedChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-[250px] flex items-center justify-center text-muted-foreground">
+              <div className="text-center">
+                <p className="text-sm">Insufficient data for MACD calculation</p>
+                <p className="text-xs mt-1">Select a longer timeframe (1M or more)</p>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -202,25 +268,34 @@ export function AnalyticsCharts({ symbol }: { symbol: string }) {
       <Card>
         <CardHeader>
           <CardTitle>Stochastic Oscillator</CardTitle>
-          <CardDescription>Momentum indicator (0-100 scale)</CardDescription>
+          <CardDescription>Momentum indicator (0-100 scale, requires 14+ data points)</CardDescription>
         </CardHeader>
         <CardContent>
-          <ResponsiveContainer width="100%" height={250}>
-            <LineChart data={data} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-              <XAxis dataKey="date" stroke="var(--color-muted-foreground)" tick={{ fontSize: 12 }} />
-              <YAxis domain={[0, 100]} stroke="var(--color-muted-foreground)" tick={{ fontSize: 12 }} />
-              <Tooltip 
-                contentStyle={{ background: 'var(--color-card)', border: '1px solid var(--color-border)', borderRadius: '6px' }}
-                labelStyle={{ color: 'var(--color-foreground)' }}
-                formatter={(value: any) => value?.toFixed(2)}
-              />
-              <Legend />
-              <Line type="monotone" dataKey="stochastic" stroke="var(--color-secondary)" dot={false} strokeWidth={2} name="Stochastic" />
-              <Line type="linear" dataKey={() => 80} stroke="var(--color-destructive)" strokeDasharray="5 5" dot={false} name="Overbought" />
-              <Line type="linear" dataKey={() => 20} stroke="var(--color-chart-1)" strokeDasharray="5 5" dot={false} name="Oversold" />
-            </LineChart>
-          </ResponsiveContainer>
+          {hasEnoughDataForStochastic ? (
+            <ResponsiveContainer width="100%" height={250}>
+              <LineChart data={stochasticData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                <XAxis dataKey="date" stroke="var(--color-muted-foreground)" tick={{ fontSize: 12 }} />
+                <YAxis domain={[0, 100]} stroke="var(--color-muted-foreground)" tick={{ fontSize: 12 }} />
+                <Tooltip
+                  contentStyle={{ background: 'var(--color-card)', border: '1px solid var(--color-border)', borderRadius: '6px' }}
+                  labelStyle={{ color: 'var(--color-foreground)' }}
+                  formatter={(value: any) => value?.toFixed(2)}
+                />
+                <Legend />
+                <Line type="monotone" dataKey="stochastic" stroke="var(--color-secondary)" dot={false} strokeWidth={2} name="Stochastic" />
+                <Line type="linear" dataKey={() => 80} stroke="var(--color-destructive)" strokeDasharray="5 5" dot={false} name="Overbought" />
+                <Line type="linear" dataKey={() => 20} stroke="var(--color-chart-1)" strokeDasharray="5 5" dot={false} name="Oversold" />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-[250px] flex items-center justify-center text-muted-foreground">
+              <div className="text-center">
+                <p className="text-sm">Insufficient data for Stochastic calculation</p>
+                <p className="text-xs mt-1">Select a longer timeframe (1M or more)</p>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -228,25 +303,34 @@ export function AnalyticsCharts({ symbol }: { symbol: string }) {
       <Card>
         <CardHeader>
           <CardTitle>RSI - Relative Strength Index</CardTitle>
-          <CardDescription>Momentum indicator (0-100 scale)</CardDescription>
+          <CardDescription>Momentum indicator (0-100 scale, requires 14+ data points)</CardDescription>
         </CardHeader>
         <CardContent>
-          <ResponsiveContainer width="100%" height={250}>
-            <LineChart data={data} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-              <XAxis dataKey="date" stroke="var(--color-muted-foreground)" tick={{ fontSize: 12 }} />
-              <YAxis domain={[0, 100]} stroke="var(--color-muted-foreground)" tick={{ fontSize: 12 }} />
-              <Tooltip
-                contentStyle={{ background: 'var(--color-card)', border: '1px solid var(--color-border)', borderRadius: '6px' }}
-                labelStyle={{ color: 'var(--color-foreground)' }}
-                formatter={(value: any) => value?.toFixed(2)}
-              />
-              <Legend />
-              <Line type="monotone" dataKey="rsi" stroke="var(--color-primary)" dot={false} strokeWidth={2} name="RSI" />
-              <Line type="monotone" dataKey={() => 70} stroke="var(--color-destructive)" strokeDasharray="5 5" dot={false} name="Overbought" />
-              <Line type="monotone" dataKey={() => 30} stroke="var(--color-chart-1)" strokeDasharray="5 5" dot={false} name="Oversold" />
-            </LineChart>
-          </ResponsiveContainer>
+          {hasEnoughDataForRSI ? (
+            <ResponsiveContainer width="100%" height={250}>
+              <LineChart data={rsiData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                <XAxis dataKey="date" stroke="var(--color-muted-foreground)" tick={{ fontSize: 12 }} />
+                <YAxis domain={[0, 100]} stroke="var(--color-muted-foreground)" tick={{ fontSize: 12 }} />
+                <Tooltip
+                  contentStyle={{ background: 'var(--color-card)', border: '1px solid var(--color-border)', borderRadius: '6px' }}
+                  labelStyle={{ color: 'var(--color-foreground)' }}
+                  formatter={(value: any) => value?.toFixed(2)}
+                />
+                <Legend />
+                <Line type="monotone" dataKey="rsi" stroke="var(--color-primary)" dot={false} strokeWidth={2} name="RSI" />
+                <Line type="monotone" dataKey={() => 70} stroke="var(--color-destructive)" strokeDasharray="5 5" dot={false} name="Overbought" />
+                <Line type="monotone" dataKey={() => 30} stroke="var(--color-chart-1)" strokeDasharray="5 5" dot={false} name="Oversold" />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-[250px] flex items-center justify-center text-muted-foreground">
+              <div className="text-center">
+                <p className="text-sm">Insufficient data for RSI calculation</p>
+                <p className="text-xs mt-1">Select a longer timeframe (1M or more)</p>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

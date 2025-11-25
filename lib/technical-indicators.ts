@@ -52,12 +52,42 @@ export interface StochasticResult {
   description: string
 }
 
+export interface VWAPResult {
+  vwap: number
+  position: 'above' | 'below'
+  description: string
+}
+
+export interface ADXResult {
+  adx: number
+  plusDI: number
+  minusDI: number
+  trend: 'strong_uptrend' | 'uptrend' | 'no_trend' | 'downtrend' | 'strong_downtrend'
+  description: string
+}
+
+export interface WilliamsRResult {
+  value: number
+  signal: 'oversold' | 'neutral' | 'overbought'
+  description: string
+}
+
+export interface CCIResult {
+  value: number
+  signal: 'oversold' | 'neutral' | 'overbought'
+  description: string
+}
+
 export interface TechnicalAnalysis {
   rsi: RSIResult
   macd: MACDResult
   bollingerBands: BollingerBandsResult
   movingAverages: MovingAverageResult
   stochastic: StochasticResult
+  vwap?: VWAPResult
+  adx?: ADXResult
+  williamsR?: WilliamsRResult
+  cci?: CCIResult
   overallSignal: 'strong_buy' | 'buy' | 'neutral' | 'sell' | 'strong_sell'
   timestamp: string
 }
@@ -356,6 +386,216 @@ export function calculateStochastic(data: PriceData[], kPeriod: number = 14, dPe
 }
 
 /**
+ * Calculate VWAP (Volume Weighted Average Price)
+ */
+export function calculateVWAP(data: PriceData[]): VWAPResult {
+  if (data.length === 0) {
+    return {
+      vwap: 0,
+      position: 'below',
+      description: 'Insufficient data for VWAP'
+    }
+  }
+
+  let cumulativeTPV = 0 // Typical Price * Volume
+  let cumulativeVolume = 0
+
+  data.forEach(bar => {
+    const typicalPrice = (bar.high + bar.low + bar.close) / 3
+    cumulativeTPV += typicalPrice * bar.volume
+    cumulativeVolume += bar.volume
+  })
+
+  const vwap = cumulativeVolume > 0 ? cumulativeTPV / cumulativeVolume : 0
+  const currentPrice = data[data.length - 1].close
+  const position = currentPrice > vwap ? 'above' : 'below'
+
+  const description = position === 'above'
+    ? `Price (${currentPrice.toFixed(2)}) is above VWAP (${vwap.toFixed(2)}) - bullish signal`
+    : `Price (${currentPrice.toFixed(2)}) is below VWAP (${vwap.toFixed(2)}) - bearish signal`
+
+  return { vwap, position, description }
+}
+
+/**
+ * Calculate ADX (Average Directional Index)
+ */
+export function calculateADX(data: PriceData[], period: number = 14): ADXResult {
+  if (data.length < period + 1) {
+    return {
+      adx: 0,
+      plusDI: 0,
+      minusDI: 0,
+      trend: 'no_trend',
+      description: 'Insufficient data for ADX'
+    }
+  }
+
+  // Calculate True Range and Directional Movement
+  const trueRanges: number[] = []
+  const plusDMs: number[] = []
+  const minusDMs: number[] = []
+
+  for (let i = 1; i < data.length; i++) {
+    const high = data[i].high
+    const low = data[i].low
+    const prevHigh = data[i - 1].high
+    const prevLow = data[i - 1].low
+    const prevClose = data[i - 1].close
+
+    // True Range
+    const tr = Math.max(
+      high - low,
+      Math.abs(high - prevClose),
+      Math.abs(low - prevClose)
+    )
+    trueRanges.push(tr)
+
+    // Directional Movement
+    const highDiff = high - prevHigh
+    const lowDiff = prevLow - low
+
+    plusDMs.push(highDiff > lowDiff && highDiff > 0 ? highDiff : 0)
+    minusDMs.push(lowDiff > highDiff && lowDiff > 0 ? lowDiff : 0)
+  }
+
+  // Smooth TR, +DM, -DM
+  let smoothTR = trueRanges.slice(0, period).reduce((a, b) => a + b, 0)
+  let smoothPlusDM = plusDMs.slice(0, period).reduce((a, b) => a + b, 0)
+  let smoothMinusDM = minusDMs.slice(0, period).reduce((a, b) => a + b, 0)
+
+  for (let i = period; i < trueRanges.length; i++) {
+    smoothTR = smoothTR - smoothTR / period + trueRanges[i]
+    smoothPlusDM = smoothPlusDM - smoothPlusDM / period + plusDMs[i]
+    smoothMinusDM = smoothMinusDM - smoothMinusDM / period + minusDMs[i]
+  }
+
+  // Calculate DI+ and DI-
+  const plusDI = smoothTR > 0 ? (smoothPlusDM / smoothTR) * 100 : 0
+  const minusDI = smoothTR > 0 ? (smoothMinusDM / smoothTR) * 100 : 0
+
+  // Calculate DX and ADX
+  const dx = plusDI + minusDI > 0
+    ? (Math.abs(plusDI - minusDI) / (plusDI + minusDI)) * 100
+    : 0
+
+  const adx = dx // Simplified - normally would smooth DX over period
+
+  // Determine trend
+  let trend: 'strong_uptrend' | 'uptrend' | 'no_trend' | 'downtrend' | 'strong_downtrend'
+  if (adx < 20) {
+    trend = 'no_trend'
+  } else if (plusDI > minusDI) {
+    trend = adx > 40 ? 'strong_uptrend' : 'uptrend'
+  } else {
+    trend = adx > 40 ? 'strong_downtrend' : 'downtrend'
+  }
+
+  const description = `ADX: ${adx.toFixed(1)} - ${trend.replace('_', ' ')}`
+
+  return { adx, plusDI, minusDI, trend, description }
+}
+
+/**
+ * Calculate Williams %R
+ */
+export function calculateWilliamsR(data: PriceData[], period: number = 14): WilliamsRResult {
+  if (data.length < period) {
+    return {
+      value: -50,
+      signal: 'neutral',
+      description: 'Insufficient data for Williams %R'
+    }
+  }
+
+  const recentData = data.slice(-period)
+  const highestHigh = Math.max(...recentData.map(d => d.high))
+  const lowestLow = Math.min(...recentData.map(d => d.low))
+  const currentClose = recentData[recentData.length - 1].close
+
+  const williamsR = ((highestHigh - currentClose) / (highestHigh - lowestLow)) * -100
+
+  let signal: 'oversold' | 'neutral' | 'overbought'
+  let description: string
+
+  if (williamsR < -80) {
+    signal = 'oversold'
+    description = `Williams %R at ${williamsR.toFixed(2)} indicates oversold conditions`
+  } else if (williamsR > -20) {
+    signal = 'overbought'
+    description = `Williams %R at ${williamsR.toFixed(2)} indicates overbought conditions`
+  } else {
+    signal = 'neutral'
+    description = `Williams %R at ${williamsR.toFixed(2)} is in neutral territory`
+  }
+
+  return { value: williamsR, signal, description }
+}
+
+/**
+ * Calculate CCI (Commodity Channel Index)
+ */
+export function calculateCCI(data: PriceData[], period: number = 20): CCIResult {
+  if (data.length < period) {
+    return {
+      value: 0,
+      signal: 'neutral',
+      description: 'Insufficient data for CCI'
+    }
+  }
+
+  // Calculate Typical Price for each period
+  const typicalPrices = data.map(d => (d.high + d.low + d.close) / 3)
+
+  // Calculate SMA of typical price
+  const recentTP = typicalPrices.slice(-period)
+  const smaTP = recentTP.reduce((sum, val) => sum + val, 0) / period
+
+  // Calculate Mean Deviation
+  const meanDeviation = recentTP.reduce((sum, val) => sum + Math.abs(val - smaTP), 0) / period
+
+  // Calculate CCI
+  const currentTP = typicalPrices[typicalPrices.length - 1]
+  const cci = meanDeviation > 0 ? (currentTP - smaTP) / (0.015 * meanDeviation) : 0
+
+  let signal: 'oversold' | 'neutral' | 'overbought'
+  let description: string
+
+  if (cci < -100) {
+    signal = 'oversold'
+    description = `CCI at ${cci.toFixed(2)} indicates oversold conditions`
+  } else if (cci > 100) {
+    signal = 'overbought'
+    description = `CCI at ${cci.toFixed(2)} indicates overbought conditions`
+  } else {
+    signal = 'neutral'
+    description = `CCI at ${cci.toFixed(2)} is in neutral range`
+  }
+
+  return { value: cci, signal, description }
+}
+
+/**
+ * Calculate Fibonacci Retracement Levels
+ */
+export function calculateFibonacci(high: number, low: number): { [key: string]: number } {
+  const diff = high - low
+
+  return {
+    '0.0%': high,
+    '23.6%': high - diff * 0.236,
+    '38.2%': high - diff * 0.382,
+    '50.0%': high - diff * 0.5,
+    '61.8%': high - diff * 0.618,
+    '78.6%': high - diff * 0.786,
+    '100.0%': low,
+    // Extension levels
+    '161.8%': high + diff * 0.618,
+    '261.8%': high + diff * 1.618
+  }
+}
+
+/**
  * Calculate comprehensive technical analysis
  */
 export function calculateTechnicalAnalysis(data: PriceData[]): TechnicalAnalysis {
@@ -366,6 +606,12 @@ export function calculateTechnicalAnalysis(data: PriceData[]): TechnicalAnalysis
   const bollingerBands = calculateBollingerBands(closePrices)
   const movingAverages = calculateMovingAverages(closePrices)
   const stochastic = calculateStochastic(data)
+
+  // New indicators
+  const vwap = calculateVWAP(data)
+  const adx = calculateADX(data)
+  const williamsR = calculateWilliamsR(data)
+  const cci = calculateCCI(data)
 
   // Calculate overall signal based on multiple indicators
   let bullishSignals = 0
@@ -391,16 +637,32 @@ export function calculateTechnicalAnalysis(data: PriceData[]): TechnicalAnalysis
   if (stochastic.signal === 'oversold') bullishSignals++
   if (stochastic.signal === 'overbought') bearishSignals++
 
+  // VWAP signals
+  if (vwap.position === 'above') bullishSignals++
+  if (vwap.position === 'below') bearishSignals++
+
+  // ADX trend signals
+  if (adx.trend === 'strong_uptrend' || adx.trend === 'uptrend') bullishSignals++
+  if (adx.trend === 'strong_downtrend' || adx.trend === 'downtrend') bearishSignals++
+
+  // Williams %R signals
+  if (williamsR.signal === 'oversold') bullishSignals++
+  if (williamsR.signal === 'overbought') bearishSignals++
+
+  // CCI signals
+  if (cci.signal === 'oversold') bullishSignals++
+  if (cci.signal === 'overbought') bearishSignals++
+
   // Determine overall signal
   let overallSignal: 'strong_buy' | 'buy' | 'neutral' | 'sell' | 'strong_sell'
 
-  if (bullishSignals >= 4) {
+  if (bullishSignals >= 6) {
     overallSignal = 'strong_buy'
-  } else if (bullishSignals >= 3) {
+  } else if (bullishSignals >= 4) {
     overallSignal = 'buy'
-  } else if (bearishSignals >= 4) {
+  } else if (bearishSignals >= 6) {
     overallSignal = 'strong_sell'
-  } else if (bearishSignals >= 3) {
+  } else if (bearishSignals >= 4) {
     overallSignal = 'sell'
   } else {
     overallSignal = 'neutral'
@@ -412,6 +674,10 @@ export function calculateTechnicalAnalysis(data: PriceData[]): TechnicalAnalysis
     bollingerBands,
     movingAverages,
     stochastic,
+    vwap,
+    adx,
+    williamsR,
+    cci,
     overallSignal,
     timestamp: new Date().toISOString()
   }

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Bell, BellOff, TrendingUp, TrendingDown, X, Plus } from 'lucide-react'
 import { useLocalStorage } from '@/hooks/use-local-storage'
+import { toast } from 'sonner'
 
 interface PriceAlert {
   id: string
@@ -54,12 +55,31 @@ export function PriceAlerts() {
                     a.id === alert.id ? { ...a, triggered: true } : a
                   ))
 
-                  // Show browser notification
+                  // Show toast notification (always visible)
+                  toast.success('Price Alert Triggered!', {
+                    description: `${alert.symbol} is now ${alert.condition} $${alert.targetPrice}. Current price: $${data.price.toFixed(2)}`,
+                    duration: 10000,
+                    action: {
+                      label: 'Dismiss',
+                      onClick: () => {}
+                    }
+                  })
+
+                  // Show browser notification (if permitted)
                   if ('Notification' in window && Notification.permission === 'granted') {
                     new Notification('Price Alert Triggered!', {
                       body: `${alert.symbol} is now ${alert.condition} $${alert.targetPrice}. Current price: $${data.price.toFixed(2)}`,
                       icon: '/icon.svg'
                     })
+                  }
+
+                  // Play sound (optional)
+                  try {
+                    const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIG2m97OeeUAwPUKfj8LNlHAY4kte0zXstBSd2x/DekEEKFFuv5+mnVRQKRp/f8r5sIQUsgc3y2Ik3CBtsve3mnlAMD1Cn4/C0ZRsGOJLXtM17LQUndsjw3pBBChRbr+fpp1UUCkae3/K+bSEFLIHN8tmJNwgbbL3t5p5QDA9Qp+PwtGUbBjiS17TNey0FJ3bI8N6QQQoUW6/n6adVFApGnt/yvm0hBSyBzvLZiDcHG2y97eadTwwPUKfj8bVlGgY4kte0zXwrBSd2yPDekEEKE1qv5+mnVRQKRp7f8r5tIQUsgc7y2Yg2Bxprvezmnk8MD1Cn4/G1ZRoGOJLXtM18KwUmdsrw3pBBChNar+fpp1QTCkef3/K+bSEFLIHN8tmINgcbbL3s5p5PDA9Qp+TxtWUaBjiS17TNfCsFJnbK8N6QQQY=')
+                    audio.volume = 0.3
+                    audio.play().catch(() => {}) // Fail silently if audio can't play
+                  } catch (e) {
+                    // Ignore audio errors
                   }
                 }
               }
@@ -104,6 +124,7 @@ export function PriceAlerts() {
     setNewSymbol('')
     setNewPrice('')
     setAdding(false)
+    toast.success(`Alert created for ${alert.symbol} ${alert.condition} $${alert.targetPrice}`)
   }
 
   const handleRemoveAlert = (id: string) => {

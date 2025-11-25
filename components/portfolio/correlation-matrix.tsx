@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { TrendingUp, AlertCircle, Info } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -26,6 +27,7 @@ export function CorrelationMatrix({ portfolio }: CorrelationMatrixProps) {
   const [correlationData, setCorrelationData] = useState<{ [key: string]: { [key: string]: number } }>({})
   const [loading, setLoading] = useState(true)
   const [diversificationScore, setDiversificationScore] = useState(0)
+  const [period, setPeriod] = useState('6mo')
 
   useEffect(() => {
     const calculateCorrelations = async () => {
@@ -45,7 +47,7 @@ export function CorrelationMatrix({ portfolio }: CorrelationMatrixProps) {
             const response = await fetch('/api/stocks/historical', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ symbol: stock.symbol, period: '3mo' }),
+              body: JSON.stringify({ symbol: stock.symbol, period }),
             })
 
             if (response.ok) {
@@ -118,7 +120,7 @@ export function CorrelationMatrix({ portfolio }: CorrelationMatrixProps) {
     }
 
     calculateCorrelations()
-  }, [portfolio])
+  }, [portfolio, period])
 
   // Calculate Pearson correlation coefficient
   const calculatePearsonCorrelation = (x: number[], y: number[]): number => {
@@ -210,11 +212,27 @@ export function CorrelationMatrix({ portfolio }: CorrelationMatrixProps) {
       {/* Diversification Score */}
       <Card className="bg-gradient-to-br from-primary/5 to-primary/10">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <TrendingUp size={20} />
-            Diversification Score
-          </CardTitle>
-          <CardDescription>How well your portfolio is diversified</CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <TrendingUp size={20} />
+                Diversification Score
+              </CardTitle>
+              <CardDescription>How well your portfolio is diversified</CardDescription>
+            </div>
+            <Select value={period} onValueChange={setPeriod}>
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1mo">1 Month</SelectItem>
+                <SelectItem value="3mo">3 Months</SelectItem>
+                <SelectItem value="6mo">6 Months</SelectItem>
+                <SelectItem value="1y">1 Year</SelectItem>
+                <SelectItem value="2y">2 Years</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-between">
@@ -251,7 +269,9 @@ export function CorrelationMatrix({ portfolio }: CorrelationMatrixProps) {
       <Card>
         <CardHeader>
           <CardTitle>Correlation Matrix</CardTitle>
-          <CardDescription>How stock returns move together (based on 3-month data)</CardDescription>
+          <CardDescription>
+            How stock returns move together (based on {period === '1mo' ? '1-month' : period === '3mo' ? '3-month' : period === '6mo' ? '6-month' : period === '1y' ? '1-year' : '2-year'} data)
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">

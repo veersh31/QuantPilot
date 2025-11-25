@@ -52,6 +52,9 @@ export interface ClosedPosition {
   realizedGainPercent: number
   holdingPeriod: number // days
   fees: number
+  washSaleDisallowed?: number // Disallowed loss due to wash sale rule
+  isWashSale?: boolean // Flag indicating wash sale
+  replacementTransactionId?: string // ID of replacement transaction if wash sale
 }
 
 export interface PortfolioSummary {
@@ -73,8 +76,20 @@ export interface TaxReport {
   longTermGains: number // Held >= 1 year
   dividendIncome: number
   totalGains: number
+  totalWashSaleDisallowed: number // Total losses disallowed by wash sale rule
   positions: ClosedPosition[]
+  washSaleWarnings: WashSaleWarning[]
   generatedAt: string
+}
+
+export interface WashSaleWarning {
+  symbol: string
+  saleDate: string
+  saleLoss: number
+  disallowedAmount: number
+  replacementDate: string
+  replacementQuantity: number
+  daysFromSale: number
 }
 
 export interface PaperTradingAccount {
@@ -227,7 +242,7 @@ export function calculatePortfolioSummary(
 }
 
 /**
- * Generate tax report for a given year
+ * Generate tax report for a given year with wash sale detection
  */
 export function generateTaxReport(
   transactions: Transaction[],
@@ -239,7 +254,9 @@ export function generateTaxReport(
   let shortTermGains = 0
   let longTermGains = 0
   let dividendIncome = 0
+  let totalWashSaleDisallowed = 0
   const closedPositions: ClosedPosition[] = []
+  const washSaleWarnings: WashSaleWarning[] = []
 
   // Group transactions by symbol
   const symbolGroups = new Map<string, Transaction[]>()
@@ -277,10 +294,57 @@ export function generateTaxReport(
 
           const costBasis = (sellQty * lot.purchasePrice) + (lot.fees * (sellQty / lot.quantity))
           const proceeds = (sellQty * txn.price) - (txn.fees * (sellQty / txn.quantity))
-          const gain = proceeds - costBasis
+          let gain = proceeds - costBasis
 
           const purchaseDate = new Date(lot.purchaseDate)
           const holdingPeriod = Math.floor((txnDate.getTime() - purchaseDate.getTime()) / (1000 * 60 * 60 * 24))
+
+          // Check for wash sale if this is a loss
+          let washSaleDisallowed = 0
+          let isWashSale = false
+          let replacementTransactionId: string | undefined
+
+          if (gain < 0) {
+            // Look for replacement purchases within 30 days before or after the sale
+            const washSaleStart = new Date(txnDate.getTime() - (30 * 24 * 60 * 60 * 1000))
+            const washSaleEnd = new Date(txnDate.getTime() + (30 * 24 * 60 * 60 * 1000))
+
+            for (const replacementTxn of sortedTxns) {
+              if (replacementTxn.type === 'buy') {
+                const replacementDate = new Date(replacementTxn.date)
+
+                // Check if replacement is within wash sale window and not the original purchase
+                if (replacementDate >= washSaleStart &&
+                    replacementDate <= washSaleEnd &&
+                    replacementTxn.date !== lot.purchaseDate) {
+
+                  isWashSale = true
+                  washSaleDisallowed = Math.abs(gain) // Disallow the entire loss
+                  replacementTransactionId = replacementTxn.id
+                  totalWashSaleDisallowed += washSaleDisallowed
+
+                  // Create warning for user
+                  const daysFromSale = Math.floor(
+                    (replacementDate.getTime() - txnDate.getTime()) / (1000 * 60 * 60 * 24)
+                  )
+
+                  washSaleWarnings.push({
+                    symbol,
+                    saleDate: txn.date,
+                    saleLoss: gain,
+                    disallowedAmount: washSaleDisallowed,
+                    replacementDate: replacementTxn.date,
+                    replacementQuantity: replacementTxn.quantity,
+                    daysFromSale
+                  })
+
+                  // Adjust gain to zero since loss is disallowed
+                  gain = 0
+                  break // Only apply wash sale once per sale
+                }
+              }
+            }
+          }
 
           // Classify as short-term (<= 365 days) or long-term (> 365 days)
           if (holdingPeriod <= 365) {
@@ -297,9 +361,12 @@ export function generateTaxReport(
             buyPrice: lot.purchasePrice,
             sellPrice: txn.price,
             realizedGain: gain,
-            realizedGainPercent: (gain / costBasis) * 100,
+            realizedGainPercent: costBasis > 0 ? (gain / costBasis) * 100 : 0,
             holdingPeriod,
-            fees: (lot.fees * (sellQty / lot.quantity)) + (txn.fees * (sellQty / txn.quantity))
+            fees: (lot.fees * (sellQty / lot.quantity)) + (txn.fees * (sellQty / txn.quantity)),
+            isWashSale,
+            washSaleDisallowed,
+            replacementTransactionId
           })
 
           lot.quantity -= sellQty
@@ -317,7 +384,9 @@ export function generateTaxReport(
     longTermGains,
     dividendIncome,
     totalGains: shortTermGains + longTermGains,
+    totalWashSaleDisallowed,
     positions: closedPositions.sort((a, b) => new Date(b.closeDate).getTime() - new Date(a.closeDate).getTime()),
+    washSaleWarnings: washSaleWarnings.sort((a, b) => new Date(b.saleDate).getTime() - new Date(a.saleDate).getTime()),
     generatedAt: new Date().toISOString()
   }
 }
