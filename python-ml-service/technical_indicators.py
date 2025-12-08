@@ -434,3 +434,94 @@ class TechnicalIndicators:
             return 'sell'
         else:
             return 'neutral'
+
+    @staticmethod
+    def calculate_timeseries(df: pd.DataFrame) -> List[Dict[str, Any]]:
+        """
+        Calculate technical indicators for every data point (for charting)
+
+        Args:
+            df: DataFrame with OHLCV data
+
+        Returns:
+            List of dictionaries with date and indicator values for each point
+        """
+        close_prices = df['close'].values
+        high_prices = df['high'].values
+        low_prices = df['low'].values
+        volume = df['volume'].values
+        dates = df['date'].values
+
+        timeseries_data = []
+
+        for i in range(len(df)):
+            point = {
+                'date': str(dates[i]),
+                'price': float(close_prices[i]),
+                'volume': float(volume[i]),
+                'macd': None,
+                'signal': None,
+                'histogram': None,
+                'bollinger_upper': None,
+                'bollinger_middle': None,
+                'bollinger_lower': None,
+                'stochastic': None,
+                'rsi': None
+            }
+
+            # MACD - need at least 26 periods
+            if i >= 26:
+                prices_slice = close_prices[:i+1]
+                prices_series = pd.Series(prices_slice)
+                ema12 = float(prices_series.ewm(span=12, adjust=False).mean().iloc[-1])
+                ema26 = float(prices_series.ewm(span=26, adjust=False).mean().iloc[-1])
+                macd_val = ema12 - ema26
+                point['macd'] = macd_val
+
+                # Signal line - need at least 34 periods (26 + 9)
+                if i >= 34:
+                    # Calculate MACD for all previous points to get signal line
+                    macd_values = []
+                    for j in range(26, i+1):
+                        p_slice = pd.Series(close_prices[:j+1])
+                        e12 = p_slice.ewm(span=12, adjust=False).mean().iloc[-1]
+                        e26 = p_slice.ewm(span=26, adjust=False).mean().iloc[-1]
+                        macd_values.append(e12 - e26)
+
+                    signal_val = float(pd.Series(macd_values).ewm(span=9, adjust=False).mean().iloc[-1])
+                    point['signal'] = signal_val
+                    point['histogram'] = macd_val - signal_val
+
+            # Bollinger Bands - need at least 20 periods
+            if i >= 19:
+                prices_slice = close_prices[i-19:i+1]
+                sma20 = np.mean(prices_slice)
+                std20 = np.std(prices_slice)
+                point['bollinger_upper'] = float(sma20 + 2 * std20)
+                point['bollinger_middle'] = float(sma20)
+                point['bollinger_lower'] = float(sma20 - 2 * std20)
+
+            # Stochastic - need at least 14 periods
+            if i >= 13:
+                high_14 = np.max(high_prices[i-13:i+1])
+                low_14 = np.min(low_prices[i-13:i+1])
+                if high_14 - low_14 > 0:
+                    point['stochastic'] = float(((close_prices[i] - low_14) / (high_14 - low_14)) * 100)
+
+            # RSI - need at least 14 periods
+            if i >= 14:
+                changes = np.diff(close_prices[i-14:i+1])
+                gains = np.where(changes > 0, changes, 0)
+                losses = np.where(changes < 0, -changes, 0)
+                avg_gain = np.mean(gains)
+                avg_loss = np.mean(losses)
+
+                if avg_loss == 0:
+                    point['rsi'] = 100.0
+                else:
+                    rs = avg_gain / avg_loss
+                    point['rsi'] = float(100 - (100 / (1 + rs)))
+
+            timeseries_data.append(point)
+
+        return timeseries_data

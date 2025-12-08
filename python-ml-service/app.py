@@ -248,6 +248,52 @@ async def calculate_indicators(request: IndicatorsRequest):
         raise HTTPException(status_code=500, detail=f"Failed to calculate indicators: {str(e)}")
 
 
+@app.post("/indicators/timeseries")
+async def calculate_indicators_timeseries(request: IndicatorsRequest):
+    """
+    Calculate technical indicators for every data point (for charting)
+
+    Returns time series data with MACD, RSI, Bollinger Bands, Stochastic for each date.
+    Used for rendering charts in the frontend.
+    """
+    symbol = request.symbol.upper()
+    cache_key = f"indicators_timeseries:{symbol}:{request.days}"
+
+    try:
+        # Check cache (5 minute TTL)
+        cached_data = cache.get(cache_key)
+        if cached_data is not None:
+            return cached_data
+
+        print(f"\n[Indicators Timeseries] Calculating for {symbol} ({request.days} days)")
+
+        # Fetch historical data
+        df = stock_fetcher.fetch_historical_data(symbol, days=request.days)
+
+        # Calculate timeseries indicators
+        timeseries_data = TechnicalIndicators.calculate_timeseries(df)
+
+        response = {
+            "symbol": symbol,
+            "data": timeseries_data,
+            "dataPoints": len(timeseries_data)
+        }
+
+        # Cache for 5 minutes
+        cache.set(cache_key, response, ttl=300)
+
+        print(f"[Indicators Timeseries] Complete for {symbol} - {len(timeseries_data)} points")
+
+        return response
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to calculate timeseries indicators: {str(e)}")
+
+
 @app.post("/features")
 async def get_engineered_features(request: FeaturesRequest):
     """
